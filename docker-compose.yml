@@ -1,41 +1,111 @@
+version: "3.9"
+
 services:
+  # --------------------------------------------------
+  # 1.  PostgreSQL (Hive & AIS metadata)
+  # --------------------------------------------------
   postgres:
     image: postgres:15
     container_name: ais_postgres
     environment:
-      POSTGRES_USER: ais_user
-      POSTGRES_PASSWORD: ais_password
-      POSTGRES_DB: ais_db
+      POSTGRES_USER: ais
+      POSTGRES_PASSWORD: aispassword
+      POSTGRES_DB: ais_pg_hub_metastore_db
     ports:
-      - "5432:5432"
+      - "55432:5432"            # host:container
     volumes:
-      - postgres_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
 
+  # --------------------------------------------------
+  # 2.  MinIO (object-storage / lake buckets)
+  # --------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: ais_minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9551"
+    ports:
+      - "9500:9000"             # S3 API
+      - "9551:9001"             # MinIO Console
+    volumes:
+      - ./minio/data:/data
+
+  # --------------------------------------------------
+  # 3.  Hive Metastore *built locally* (with patched schema)
+  # --------------------------------------------------
+  hive-metastore:
+    build: ./hive-metastore     # ⟵ directory that holds the Dockerfile you created
+    container_name: ais_hive
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      DB_HOST: ais_postgres
+      DB_NAME: ais_pg_hub_metastore_db
+      DB_USER: ais
+      DB_PASSWORD: aispassword
+    command: >
+      bash -c "
+        /opt/hive/bin/schematool -dbType postgres -initSchema &&
+        /opt/hive/bin/hive --service metastore
+      "
+    depends_on:
+      - postgres
+    ports:
+      - "59083:9083"
+    volumes:
+      - ./hive/conf:/opt/hive/conf
+      - ./hive/warehouse:/opt/hive/warehouse
+
+  # --------------------------------------------------
+  # 4.  Trino (SQL query engine)
+  # --------------------------------------------------
   trino:
     image: trinodb/trino:latest
     container_name: ais_trino
     ports:
-      - "8080:8080"
+      - "58080:8080"            # Trino Web UI
     volumes:
       - ./trino/etc:/etc/trino
+    depends_on:
+      - postgres
+      - minio
+      - hive-metastore
 
+  # --------------------------------------------------
+  # 5.  Spark (with Iceberg JARs)
+  # --------------------------------------------------
+  spark:
+    build: ./spark
+    container_name: ais_spark
+    environment:
+      SPARK_MASTER: local[*]
+      MINIO_ENDPOINT: http://ais_minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      HADOOP_HOME: /opt/hadoop
+    volumes:
+      - ./spark/jobs:/opt/spark/jobs
+      - ./spark/conf:/opt/spark/conf
+    ports:
+      - "55900:4040"            # Spark Web UI
+    depends_on:
+      - hive-metastore
+      - minio
+
+  # --------------------------------------------------
+  # 6.  AIS Core API
+  # --------------------------------------------------
   ais-core:
     build: ./ais-core
     container_name: ais_core
-    ports:
-      - "5000:5000"
     volumes:
       - ./ais-core/app:/app
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=ais_user
-      - DB_PASSWORD=ais_password
-      - DB_NAME=ais_db
+    ports:
+      - "55500:5000"            # REST API port
     depends_on:
       - postgres
       - trino
-
-volumes:
-  postgres_data:
+      - minio
+      - hive-metastore

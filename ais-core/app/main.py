@@ -1,7 +1,11 @@
-from fastapi import FastAPI
+from flask import Flask, jsonify
+import os
 
-app = FastAPI()
+app = Flask(__name__)
 
-@app.get("/")
-def root():
-    return {"message": "AIS Core is running"}
+@app.route("/")
+def index():
+    return jsonify({"status": "AIS Core API Running"})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

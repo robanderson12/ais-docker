@@ -1,5 +1,4 @@
-fastapi
-uvicorn
-psycopg2-binary
+flask
 sqlalchemy
-pyiceberg
+psycopg2-binary
+boto3

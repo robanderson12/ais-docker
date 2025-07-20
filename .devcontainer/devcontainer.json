@@ -1,0 +1,13 @@
+{
+  "name": "AIS Dev Container",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "ais-core",
+  "workspaceFolder": "/app",
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash"
+  },
+  "extensions": [
+    "ms-python.python",
+    "ms-azuretools.vscode-docker"
+  ]
+}
