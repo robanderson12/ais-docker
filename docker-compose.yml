@@ -1,87 +1,83 @@
-version: "3.9"
+version: "3.8"
 
 services:
-  # --------------------------------------------------
-  # 1.  PostgreSQL (Hive & AIS metadata)
-  # --------------------------------------------------
+  # 1. PostgreSQL (Hive & AIS metadata)
   postgres:
     image: postgres:15
-    container_name: ais_postgres
     environment:
       POSTGRES_USER: ais
       POSTGRES_PASSWORD: aispassword
       POSTGRES_DB: ais_pg_hub_metastore_db
     ports:
-      - "55432:5432"            # host:container
+      - "55432:5432"
     volumes:
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ais -d ais_pg_hub_metastore_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  # --------------------------------------------------
-  # 2.  MinIO (object-storage / lake buckets)
-  # --------------------------------------------------
+  # 2. MinIO (object-storage / lake buckets)
   minio:
     image: minio/minio:latest
-    container_name: ais_minio
+    command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9551"
     ports:
-      - "9500:9000"             # S3 API
-      - "9551:9001"             # MinIO Console
+      - "9500:9000"
+      - "9551:9001"
     volumes:
-      - ./minio/data:/data
+      - minio_data:/data
 
-  # --------------------------------------------------
-  # 3.  Hive Metastore *built locally* (with patched schema)
-  # --------------------------------------------------
+  # 3. Hive Metastore (patched) — ARM-ready
   hive-metastore:
-    build: ./hive-metastore     # ⟵ directory that holds the Dockerfile you created
-    container_name: ais_hive
+    platform: linux/arm64
+    build: ./hive-metastore
     environment:
-      SERVICE_NAME: metastore
       DB_DRIVER: postgres
-      DB_HOST: ais_postgres
-      DB_NAME: ais_pg_hub_metastore_db
-      DB_USER: ais
-      DB_PASSWORD: aispassword
-    command: >
-      bash -c "
-        /opt/hive/bin/schematool -dbType postgres -initSchema &&
-        /opt/hive/bin/hive --service metastore
-      "
+      SERVICE_NAME: metastore
+      DB_TYPE: postgres
+      # Override any derby defaults
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://postgres:5432/ais_pg_hub_metastore_db"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionDriverName: "org.postgresql.Driver"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionUserName: "ais"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionPassword: "aispassword"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
       - "59083:9083"
     volumes:
-      - ./hive/conf:/opt/hive/conf
-      - ./hive/warehouse:/opt/hive/warehouse
+      - ./hive-metastore/warehouse:/opt/hive/warehouse
 
-  # --------------------------------------------------
-  # 4.  Trino (SQL query engine)
-  # --------------------------------------------------
   trino:
+    platform: linux/arm64
     image: trinodb/trino:latest
-    container_name: ais_trino
     ports:
-      - "58080:8080"            # Trino Web UI
+      - "58080:8080"
     volumes:
       - ./trino/etc:/etc/trino
+      - ./trino/data:/var/trino/data 
     depends_on:
       - postgres
       - minio
       - hive-metastore
-
-  # --------------------------------------------------
-  # 5.  Spark (with Iceberg JARs)
-  # --------------------------------------------------
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ui/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped  # Add auto-restart
+    
+  # 5. Spark (with Iceberg JARs)
   spark:
+    platform: linux/arm64
     build: ./spark
-    container_name: ais_spark
     environment:
       SPARK_MASTER: local[*]
-      MINIO_ENDPOINT: http://ais_minio:9000
+      MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       HADOOP_HOME: /opt/hadoop
@@ -89,23 +85,25 @@ services:
       - ./spark/jobs:/opt/spark/jobs
       - ./spark/conf:/opt/spark/conf
     ports:
-      - "55900:4040"            # Spark Web UI
+      - "55900:4040"
     depends_on:
       - hive-metastore
       - minio
 
-  # --------------------------------------------------
-  # 6.  AIS Core API
-  # --------------------------------------------------
+  # 6. AIS Core API
   ais-core:
+    platform: linux/arm64
     build: ./ais-core
-    container_name: ais_core
     volumes:
       - ./ais-core/app:/app
     ports:
-      - "55500:5000"            # REST API port
+      - "55500:5000"
     depends_on:
       - postgres
       - trino
       - minio
       - hive-metastore
+
+volumes:
+  postgres_data:
+  minio_data:

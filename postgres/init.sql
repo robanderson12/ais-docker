@@ -1,12 +1,7 @@
--- Create metadata DB
-CREATE DATABASE ais_pg_hub_metastore_db;
-
--- Create data DB
-CREATE DATABASE ais_pg_hub_datastore_db;
-
--- Grant privileges
+-- This database should already be created by POSTGRES_DB env var,
+-- but we'll ensure it exists
 \c ais_pg_hub_metastore_db;
-GRANT ALL PRIVILEGES ON DATABASE ais_pg_hub_metastore_db TO ais;
 
-\c ais_pg_hub_datastore_db;
-GRANT ALL PRIVILEGES ON DATABASE ais_pg_hub_datastore_db TO ais;
+-- Grant all privileges
+GRANT ALL PRIVILEGES ON DATABASE ais_pg_hub_metastore_db TO ais;
+GRANT ALL PRIVILEGES ON SCHEMA public TO ais;

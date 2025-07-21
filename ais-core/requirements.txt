@@ -1,4 +1,8 @@
-flask
-sqlalchemy
-psycopg2-binary
-boto3
+fastapi==0.98.0
+uvicorn[standard]==0.23.1
+minio==7.1.11
+trino==0.329.0
+psycopg2-binary==2.9.7
+sqlalchemy==2.0.15
+python-dotenv==1.0.0
+boto3==1.28.0
